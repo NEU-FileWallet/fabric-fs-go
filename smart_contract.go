@@ -14,7 +14,7 @@ type SmartContract struct {
 	contractapi.Contract
 }
 
-func iteration(ctx contractapi.TransactionContextInterface, sourceDirKey, destinationDirKey string, ownerId, ownerName string, timestamp int64) error {
+func iteration(ctx contractapi.TransactionContextInterface, sourceDirKey, destinationDirKey string, creatorID, creatorName string, timestamp int64) error {
 
 	sourceDir, err := getDirectory(ctx, sourceDirKey, Subscriber)
 	if err != nil {
@@ -26,19 +26,22 @@ func iteration(ctx contractapi.TransactionContextInterface, sourceDirKey, destin
 		return err
 	}
 
-	cloneDir := NewDirectory(sourceDir.Name, ownerId, ownerName, sourceDir.Visibility, timestamp)
-	cloneDirKey := CalculateDirectoryKey(timestamp, ownerId, sourceDir.Name)
+	cloneDir := NewDirectory(sourceDir.Name, creatorID, creatorName, sourceDir.Visibility, timestamp)
+	cloneDirKey := CalculateDirectoryKey(timestamp, creatorID, sourceDir.Name)
 	log.Println("cloneDirKey")
 	log.Println(cloneDirKey)
 	cloneDir.Files = sourceDir.Files
 
 	for _, dirKey := range sourceDir.Directories {
-		if err := iteration(ctx, dirKey, cloneDirKey, ownerId, ownerName, timestamp); err != nil {
-			log.Println(err)
+		if err := iteration(ctx, dirKey, cloneDirKey, creatorID, creatorName, timestamp); err != nil {
+			return err
 		}
 	}
 
 	destinationDir.AddDirectories([]string{cloneDirKey})
+	cloneDir.Cooperators = destinationDir.Cooperators
+	cloneDir.Subscribers = destinationDir.Subscribers
+	cloneDir.IDNameMap = destinationDir.IDNameMap
 	err = PutJsonState(ctx, cloneDirKey, cloneDir)
 	if err != nil {
 		return err
@@ -223,7 +226,7 @@ func (s *SmartContract) RemoveDirectories(ctx contractapi.TransactionContextInte
 }
 
 func (s *SmartContract) RenameDirectory(ctx contractapi.TransactionContextInterface, key string, name string) (*Directory, error) {
-	directory, err := getDirectory(ctx, key, Owner)
+	directory, err := getDirectory(ctx, key, Cooperator)
 	if err != nil {
 		return nil, err
 	}
@@ -251,12 +254,11 @@ func (s *SmartContract) AddFile(ctx contractapi.TransactionContextInterface, key
 }
 
 func (s *SmartContract) CreateDirectory(ctx contractapi.TransactionContextInterface, name string, visibility string) (string, error) {
-	id, err := getUserID(ctx)
+	creatorID, err := getUserID(ctx)
 	if err != nil {
 		return "", err
 	}
-
-	ownerName, err := s.ReadUserName(ctx, id)
+	creatorName, err := s.ReadUserName(ctx, creatorID)
 	if err != nil {
 		return "", err
 	}
@@ -266,8 +268,8 @@ func (s *SmartContract) CreateDirectory(ctx contractapi.TransactionContextInterf
 		return "", err
 	}
 
-	directory := NewDirectory(name, id, ownerName, visibility, timestamp.Seconds)
-	key := CalculateDirectoryKey(timestamp.Seconds, id, name)
+	directory := NewDirectory(name, creatorID, creatorName, visibility, timestamp.Seconds)
+	key := CalculateDirectoryKey(timestamp.Seconds, creatorID, name)
 
 	if err = directory.Save(ctx, key); err != nil {
 		return "", err
@@ -277,7 +279,7 @@ func (s *SmartContract) CreateDirectory(ctx contractapi.TransactionContextInterf
 }
 
 func (s *SmartContract) SetDirectoryVisibility(ctx contractapi.TransactionContextInterface, key string, visibility string) (*Directory, error) {
-	directory, err := getDirectory(ctx, key, Owner)
+	directory, err := getDirectory(ctx, key, Cooperator)
 	if err != nil {
 		return nil, err
 	}
@@ -334,59 +336,67 @@ func getNameByID(ctx contractapi.TransactionContextInterface, ids []string) ([]s
 	return names, nil
 }
 
+type Action = func(directory *Directory, ids []string, names []string, timestamp int64)
+
 func updateDirectoryAccess(
 	ctx contractapi.TransactionContextInterface,
 	key string,
 	ids []string,
-	action func(directory *Directory, ids []string, names []string, timestamp int64),
-) (*Directory, error) {
+	recursive bool,
+	action Action,
+) error {
 	timestamp, err := ctx.GetStub().GetTxTimestamp()
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	directory, err := getDirectory(ctx, key, Owner)
-	if err != nil {
-		log.Println("can not get directory:" + err.Error())
-		return nil, err
-	}
-
-	log.Println(getUserID(ctx))
-
 	names, err := getNameByID(ctx, ids)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	action(directory, ids, names, timestamp.Seconds)
-
-	if err = directory.Save(ctx, key); err != nil {
-		return nil, err
-	}
-	log.Println(getDirectory(ctx, key, Owner))
-	return directory, nil
+	return updateIteration(ctx, key, ids, names, timestamp.Seconds, recursive, action)
 }
 
-func (s *SmartContract) AddSubscribers(ctx contractapi.TransactionContextInterface, key string, ids []string) (*Directory, error) {
-	return updateDirectoryAccess(ctx, key, ids, func(directory *Directory, ids []string, names []string, timestamp int64) {
+func updateIteration(ctx contractapi.TransactionContextInterface, dirKey string, ids, names []string, timestamp int64, recursive bool, action Action) error {
+	dir, err := getDirectory(ctx, dirKey, All)
+	if err != nil {
+		return err
+	}
+	action(dir, ids, names, timestamp)
+	if err = dir.Save(ctx, dirKey); err != nil {
+		return err
+	}
+	if recursive {
+		for _, dirKey := range dir.Directories {
+			err = updateIteration(ctx, dirKey, ids, names, timestamp, recursive, action)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (s *SmartContract) AddSubscribers(ctx contractapi.TransactionContextInterface, key string, ids []string, recursive bool) error {
+	return updateDirectoryAccess(ctx, key, ids, recursive, func(directory *Directory, ids []string, names []string, timestamp int64) {
 		directory.AddSubscribers(ids, names, timestamp+validity)
 	})
 }
 
-func (s *SmartContract) AddCooperators(ctx contractapi.TransactionContextInterface, key string, ids []string) (*Directory, error) {
-	return updateDirectoryAccess(ctx, key, ids, func(directory *Directory, ids []string, names []string, timestamp int64) {
+func (s *SmartContract) AddCooperators(ctx contractapi.TransactionContextInterface, key string, ids []string, recursive bool) error {
+	return updateDirectoryAccess(ctx, key, ids, recursive, func(directory *Directory, ids []string, names []string, timestamp int64) {
 		directory.AddCooperators(ids, names)
 	})
 }
 
-func (s *SmartContract) RemoveSubscribers(ctx contractapi.TransactionContextInterface, key string, ids []string) (*Directory, error) {
-	return updateDirectoryAccess(ctx, key, ids, func(directory *Directory, ids []string, names []string, timestamp int64) {
+func (s *SmartContract) RemoveSubscribers(ctx contractapi.TransactionContextInterface, key string, ids []string, recursive bool) error {
+	return updateDirectoryAccess(ctx, key, ids, recursive, func(directory *Directory, ids []string, names []string, timestamp int64) {
 		directory.RemoveSubscribers(ids)
 	})
 }
 
-func (s *SmartContract) RemoveCooperators(ctx contractapi.TransactionContextInterface, key string, ids []string) (*Directory, error) {
-	return updateDirectoryAccess(ctx, key, ids, func(directory *Directory, ids []string, names []string, timestamp int64) {
+func (s *SmartContract) RemoveCooperators(ctx contractapi.TransactionContextInterface, key string, ids []string, recursive bool) error {
+	return updateDirectoryAccess(ctx, key, ids, recursive, func(directory *Directory, ids []string, names []string, timestamp int64) {
 		directory.RemoveCooperators(ids)
 	})
 }
@@ -419,7 +429,7 @@ func (s *SmartContract) Subscribe(ctx contractapi.TransactionContextInterface, k
 		return directory, nil
 	}
 
-	if directory.IsOwner(id) || directory.IsCooperator(id) || directory.Visibility == Public {
+	if directory.IsCreator(id) || directory.IsCooperator(id) || directory.Visibility == Public {
 		directory.AddSubscribers(ids, names, timestamp.Seconds+validity)
 	} else {
 		return nil, fmt.Errorf("can't access private directory")

@@ -12,7 +12,7 @@ type Directory struct {
 	Name        string            `json:"name"`
 	Directories []string          `json:"directories"`
 	Files       []*FileMeta       `json:"files"`
-	Owner       string            `json:"owner"`
+	Creator     string            `json:"creator"`
 	Editor      string            `json:"editor"`
 	Date        int64             `json:"date"`
 	Cooperators []string          `json:"cooperators"`
@@ -28,7 +28,6 @@ const (
 	All Privilege = iota
 	Subscriber
 	Cooperator
-	Owner
 )
 
 const (
@@ -54,15 +53,11 @@ func getDirectory(ctx contractapi.TransactionContextInterface, key string, privi
 	privilegeError := fmt.Errorf("illegal access")
 	switch privilege {
 	case Subscriber:
-		if !directory.IsCooperator(id) && !directory.IsOwner(id) && !directory.IsSubscribers(id, timestamp.Seconds) {
+		if !directory.IsCooperator(id) && !directory.IsSubscribers(id, timestamp.Seconds) {
 			return nil, privilegeError
 		}
 	case Cooperator:
-		if !directory.IsOwner(id) && !directory.IsCooperator(id) {
-			return nil, privilegeError
-		}
-	case Owner:
-		if !directory.IsOwner(id) {
+		if !directory.IsCooperator(id) {
 			return nil, privilegeError
 		}
 	}
@@ -71,22 +66,21 @@ func getDirectory(ctx contractapi.TransactionContextInterface, key string, privi
 }
 
 func CalculateDirectoryKey(timestamp int64, id, name string) string {
-
 	return SHA256(fmt.Sprintf("%s%d%s", id, timestamp, name))
 }
 
-func NewDirectory(name, ownerID, ownerName string, visibility string, date int64) *Directory {
+func NewDirectory(name, creatorID, creatorName string, visibility string, date int64) *Directory {
 	return &Directory{
 		Name:        name,
 		Directories: make([]string, 0),
 		Files:       make([]*FileMeta, 0),
-		Owner:       ownerID,
+		Creator:     creatorID,
 		Date:        date,
-		Editor:      ownerID,
-		Cooperators: make([]string, 0),
+		Editor:      creatorID,
+		Cooperators: []string{creatorID},
 		Subscribers: make([]*SubscriberMeta, 0),
 		Deleted:     false,
-		IDNameMap:   map[string]string{ownerID: ownerName},
+		IDNameMap:   map[string]string{creatorID: creatorName},
 		Visibility:  visibility,
 	}
 }
@@ -96,8 +90,8 @@ func (d *Directory) ToString() string {
 	return string(bytes)
 }
 
-func (d *Directory) IsOwner(id string) bool {
-	return id == d.Owner
+func (d *Directory) IsCreator(id string) bool {
+	return id == d.Creator
 }
 
 func (d *Directory) IsCooperator(id string) bool {
@@ -159,15 +153,15 @@ func (d *Directory) RemoveCooperators(id []string) {
 
 func (d *Directory) AddSubscribers(id []string, names []string, date int64) {
 	tempArray := make([]*SubscriberMeta, len(id))
-	for index, item := range id {
+	for _, item := range id {
 		if d.IsSubscribers(item, date) {
 			continue
 		}
 
-		tempArray[index] = &SubscriberMeta{
+		tempArray = append(tempArray, &SubscriberMeta{
 			Id:      item,
 			DueDate: date,
-		}
+		})
 	}
 	d.Subscribers = append(d.Subscribers, tempArray...)
 

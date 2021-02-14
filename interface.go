@@ -16,12 +16,12 @@ type BlockDriveInterface interface {
 	RemoveFile(ctx contractapi.TransactionContextInterface, key string, file []string) (*Directory, error)
 	SetDirectoryVisibility(ctx contractapi.TransactionContextInterface, key string, visibility string) (*Directory, error)
 	ReadDirectoryHistory(ctx contractapi.TransactionContextInterface, key string) ([]*Directory, error)
-	CopyDirectory(ctx contractapi.TransactionContextInterface, source, destination string)
+	CopyDirectory(ctx contractapi.TransactionContextInterface, source, destination string) error
 
-	AddSubscribers(ctx contractapi.TransactionContextInterface, key string, ids []string) (*Directory, error)
-	AddCooperators(ctx contractapi.TransactionContextInterface, key string, ids []string) (*Directory, error)
-	RemoveSubscribers(ctx contractapi.TransactionContextInterface, key string, ids []string) (*Directory, error)
-	RemoveCooperators(ctx contractapi.TransactionContextInterface, key string, ids []string) (*Directory, error)
+	AddSubscribers(ctx contractapi.TransactionContextInterface, key string, ids []string, recursive bool) error
+	AddCooperators(ctx contractapi.TransactionContextInterface, key string, ids []string, recursive bool) error
+	RemoveSubscribers(ctx contractapi.TransactionContextInterface, key string, ids []string, recursive bool) error
+	RemoveCooperators(ctx contractapi.TransactionContextInterface, key string, ids []string, recursive bool) error
 
 	Subscribe(ctx contractapi.TransactionContextInterface, key string) (*Directory, error)
 }
