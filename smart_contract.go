@@ -14,6 +14,10 @@ type SmartContract struct {
 	contractapi.Contract
 }
 
+func (s *SmartContract) Ping(ctx contractapi.TransactionContextInterface) (string, error) {
+	return "pong", nil
+}
+
 func iteration(ctx contractapi.TransactionContextInterface, sourceDirKey, destinationDirKey string, creatorID, creatorName string, timestamp int64) error {
 
 	sourceDir, err := getDirectory(ctx, sourceDirKey, Subscriber)
