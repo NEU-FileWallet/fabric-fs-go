@@ -35,35 +35,45 @@ const (
 	Private = "Private"
 )
 
-func getDirectory(ctx contractapi.TransactionContextInterface, key string, privilege Privilege) (*Directory, error) {
-	id, err := getUserID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	timestamp, err := ctx.GetStub().GetTxTimestamp()
-	if err != nil {
-		return nil, err
-	}
+var privilegeError = fmt.Errorf("illegal access")
 
+func getDirectory(ctx contractapi.TransactionContextInterface, key string) (*Directory, error) {
 	directory := new(Directory)
-	if err = GetJsonState(ctx, key, directory); err != nil {
+	if err := GetJsonState(ctx, key, directory); err != nil {
 		return nil, fmt.Errorf("directory doesn't exist")
 	}
-
-	privilegeError := fmt.Errorf("illegal access")
-	switch privilege {
-	case Subscriber:
-		if !directory.IsCooperator(id) && !directory.IsSubscribers(id, timestamp.Seconds) {
-			return nil, privilegeError
-		}
-	case Cooperator:
-		if !directory.IsCooperator(id) {
-			return nil, privilegeError
-		}
-	}
-
 	return directory, nil
 }
+
+//func getDirectoryWithPrivilege(ctx contractapi.TransactionContextInterface, key string, privilege Privilege) (*Directory, error) {
+//	id, err := getUserID(ctx)
+//	if err != nil {
+//		return nil, err
+//	}
+//	timestamp, err := ctx.GetStub().GetTxTimestamp()
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//    directory, err := getDirectory(ctx, key)
+//	if err != nil {
+//        return nil, err
+//    }
+//
+//	privilegeError := fmt.Errorf("illegal access")
+//	switch privilege {
+//	case Subscriber:
+//		if !directory.IsCooperator(id) && !directory.IsSubscribers(id, timestamp.Seconds) {
+//			return nil, privilegeError
+//		}
+//	case Cooperator:
+//		if !directory.IsCooperator(id) {
+//			return nil, privilegeError
+//		}
+//	}
+//
+//	return directory, nil
+//}
 
 func CalculateDirectoryKey(timestamp int64, id, name string) string {
 	return SHA256(fmt.Sprintf("%s%d%s", id, timestamp, name))
@@ -83,6 +93,29 @@ func NewDirectory(name, creatorID, creatorName string, visibility string, date i
 		IDNameMap:   map[string]string{creatorID: creatorName},
 		Visibility:  visibility,
 	}
+}
+
+func (d *Directory) CheckPrivilege(ctx contractapi.TransactionContextInterface, privilege Privilege) (bool, error) {
+	id, err := getUserID(ctx)
+	if err != nil {
+		return false, err
+	}
+	timestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return false, err
+	}
+
+	switch privilege {
+	case Subscriber:
+		if !d.IsCooperator(id) && !d.IsSubscribers(id, timestamp.Seconds) {
+			return false, privilegeError
+		}
+	case Cooperator:
+		if !d.IsCooperator(id) {
+			return false, privilegeError
+		}
+	}
+	return true, nil
 }
 
 func (d *Directory) ToString() string {

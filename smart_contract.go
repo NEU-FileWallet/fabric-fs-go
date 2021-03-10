@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
-	"log"
 )
 
 const validity = 315532800
@@ -14,26 +13,38 @@ type SmartContract struct {
 	contractapi.Contract
 }
 
-func (s *SmartContract) Ping(ctx contractapi.TransactionContextInterface) (string, error) {
+func (s *SmartContract) Ping(_ contractapi.TransactionContextInterface) (string, error) {
 	return "pong", nil
 }
 
 func iteration(ctx contractapi.TransactionContextInterface, sourceDirKey, destinationDirKey string, creatorID, creatorName string, timestamp int64) error {
 
-	sourceDir, err := getDirectory(ctx, sourceDirKey, Subscriber)
+	sourceDir, err := getDirectory(ctx, sourceDirKey)
 	if err != nil {
 		return err
 	}
-
-	destinationDir, err := getDirectory(ctx, destinationDirKey, Subscriber)
+	ok, err := sourceDir.CheckPrivilege(ctx, Subscriber)
 	if err != nil {
 		return err
+	}
+	if !ok && sourceDir.Visibility != Public {
+		return privilegeError
+	}
+
+	destinationDir, err := getDirectory(ctx, destinationDirKey)
+	if err != nil {
+		return err
+	}
+	ok, err = destinationDir.CheckPrivilege(ctx, Cooperator)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return privilegeError
 	}
 
 	cloneDir := NewDirectory(sourceDir.Name, creatorID, creatorName, sourceDir.Visibility, timestamp)
 	cloneDirKey := CalculateDirectoryKey(timestamp, creatorID, sourceDir.Name)
-	log.Println("cloneDirKey")
-	log.Println(cloneDirKey)
 	cloneDir.Files = sourceDir.Files
 
 	for _, dirKey := range sourceDir.Directories {
@@ -73,9 +84,16 @@ func (s *SmartContract) CopyDirectory(ctx contractapi.TransactionContextInterfac
 
 //RemoveFile Remove file from directory. It will return an updated directory or an error.
 func (s *SmartContract) RemoveFile(ctx contractapi.TransactionContextInterface, key string, file []string) (*Directory, error) {
-	directory, err := getDirectory(ctx, key, Cooperator)
+	directory, err := getDirectory(ctx, key)
 	if err != nil {
 		return nil, err
+	}
+	ok, err := directory.CheckPrivilege(ctx, Cooperator)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, privilegeError
 	}
 
 	directory.RemoveFiles(file)
@@ -173,23 +191,49 @@ func (s *SmartContract) ReadUserName(ctx contractapi.TransactionContextInterface
 func (s *SmartContract) ReadDirectories(ctx contractapi.TransactionContextInterface, keys []string) (map[string]*Directory, error) {
 	resultMap := make(map[string]*Directory)
 	for _, key := range keys {
-		directory, err := getDirectory(ctx, key, Subscriber)
+		directory, err := getDirectory(ctx, key)
 		if err != nil {
 			continue
 		}
+		ok, err := directory.CheckPrivilege(ctx, Subscriber)
+		if err != nil {
+			continue
+		}
+		if !ok && directory.Visibility != Public {
+			continue
+		}
+
 		resultMap[key] = directory
 	}
 	return resultMap, nil
 }
 
 func (s *SmartContract) ReadDirectory(ctx contractapi.TransactionContextInterface, key string) (*Directory, error) {
-	return getDirectory(ctx, key, Subscriber)
+	directory, err := getDirectory(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	ok, err := directory.CheckPrivilege(ctx, Subscriber)
+	if err != nil {
+		return nil, err
+	}
+	if !ok && directory.Visibility != Public {
+		return nil, privilegeError
+	}
+	return directory, nil
 }
 
 func (s *SmartContract) AddDirectories(ctx contractapi.TransactionContextInterface, parentKey string, newDireKeys []string) (*Directory, error) {
-	directory, err := getDirectory(ctx, parentKey, Cooperator)
+	directory, err := getDirectory(ctx, parentKey)
 	if err != nil {
 		return nil, err
+	}
+	ok, err := directory.CheckPrivilege(ctx, Cooperator)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, privilegeError
 	}
 
 	newDirs, err := s.ReadDirectories(ctx, newDireKeys)
@@ -216,9 +260,16 @@ func (s *SmartContract) AddDirectories(ctx contractapi.TransactionContextInterfa
 }
 
 func (s *SmartContract) RemoveDirectories(ctx contractapi.TransactionContextInterface, parentKey string, childrenKeys []string) (*Directory, error) {
-	directory, err := getDirectory(ctx, parentKey, Cooperator)
+	directory, err := getDirectory(ctx, parentKey)
 	if err != nil {
 		return nil, err
+	}
+	ok, err := directory.CheckPrivilege(ctx, Cooperator)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, privilegeError
 	}
 
 	directory.RemoveDirectories(childrenKeys)
@@ -230,9 +281,16 @@ func (s *SmartContract) RemoveDirectories(ctx contractapi.TransactionContextInte
 }
 
 func (s *SmartContract) RenameDirectory(ctx contractapi.TransactionContextInterface, key string, name string) (*Directory, error) {
-	directory, err := getDirectory(ctx, key, Cooperator)
+	directory, err := getDirectory(ctx, key)
 	if err != nil {
 		return nil, err
+	}
+	ok, err := directory.CheckPrivilege(ctx, Cooperator)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, privilegeError
 	}
 
 	directory.Name = name
@@ -244,9 +302,16 @@ func (s *SmartContract) RenameDirectory(ctx contractapi.TransactionContextInterf
 }
 
 func (s *SmartContract) AddFile(ctx contractapi.TransactionContextInterface, key string, files []*FileMeta) (*Directory, error) {
-	directory, err := getDirectory(ctx, key, Cooperator)
+	directory, err := getDirectory(ctx, key)
 	if err != nil {
 		return nil, err
+	}
+	ok, err := directory.CheckPrivilege(ctx, Cooperator)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, privilegeError
 	}
 
 	directory.AddFiles(files)
@@ -283,10 +348,18 @@ func (s *SmartContract) CreateDirectory(ctx contractapi.TransactionContextInterf
 }
 
 func (s *SmartContract) SetDirectoryVisibility(ctx contractapi.TransactionContextInterface, key string, visibility string) (*Directory, error) {
-	directory, err := getDirectory(ctx, key, Cooperator)
+	directory, err := getDirectory(ctx, key)
 	if err != nil {
 		return nil, err
 	}
+	ok, err := directory.CheckPrivilege(ctx, Cooperator)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, privilegeError
+	}
+
 	directory.Visibility = visibility
 	if err = directory.Save(ctx, key); err != nil {
 		return nil, err
@@ -295,9 +368,16 @@ func (s *SmartContract) SetDirectoryVisibility(ctx contractapi.TransactionContex
 }
 
 func (s *SmartContract) ReadDirectoryHistory(ctx contractapi.TransactionContextInterface, key string) ([]*Directory, error) {
-	_, err := getDirectory(ctx, key, Subscriber)
+	directory, err := getDirectory(ctx, key)
 	if err != nil {
 		return nil, err
+	}
+	ok, err := directory.CheckPrivilege(ctx, Subscriber)
+	if err != nil {
+		return nil, err
+	}
+	if !ok && directory.Visibility != Public {
+		return nil, privilegeError
 	}
 
 	iterator, err := ctx.GetStub().GetHistoryForKey(key)
@@ -362,10 +442,11 @@ func updateDirectoryAccess(
 }
 
 func updateIteration(ctx contractapi.TransactionContextInterface, dirKey string, ids, names []string, timestamp int64, recursive bool, action Action) error {
-	dir, err := getDirectory(ctx, dirKey, All)
+	dir, err := getDirectory(ctx, dirKey)
 	if err != nil {
 		return err
 	}
+
 	action(dir, ids, names, timestamp)
 	if err = dir.Save(ctx, dirKey); err != nil {
 		return err
@@ -424,7 +505,7 @@ func (s *SmartContract) Subscribe(ctx contractapi.TransactionContextInterface, k
 		return nil, err
 	}
 
-	directory, err := getDirectory(ctx, key, All)
+	directory, err := getDirectory(ctx, key)
 	if err != nil {
 		return nil, err
 	}
