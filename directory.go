@@ -108,11 +108,11 @@ func (d *Directory) CheckPrivilege(ctx contractapi.TransactionContextInterface, 
 	switch privilege {
 	case Subscriber:
 		if !d.IsCooperator(id) && !d.IsSubscribers(id, timestamp.Seconds) {
-			return false, privilegeError
+			return false, nil
 		}
 	case Cooperator:
 		if !d.IsCooperator(id) {
-			return false, privilegeError
+			return false, nil
 		}
 	}
 	return true, nil
