@@ -446,6 +446,13 @@ func updateIteration(ctx contractapi.TransactionContextInterface, dirKey string,
 	if err != nil {
 		return err
 	}
+	ok, err := dir.CheckPrivilege(ctx, Cooperator)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return privilegeError
+	}
 
 	action(dir, ids, names, timestamp)
 	if err = dir.Save(ctx, dirKey); err != nil {
