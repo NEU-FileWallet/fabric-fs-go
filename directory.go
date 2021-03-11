@@ -138,7 +138,7 @@ func (d *Directory) IsCooperator(id string) bool {
 
 func (d *Directory) IsSubscribers(id string, timestamp int64) bool {
 	for _, subscriber := range d.Subscribers {
-		if subscriber.Id == id && subscriber.DueDate < timestamp {
+		if subscriber.Id == id && subscriber.DueDate > timestamp {
 			return true
 		}
 	}
@@ -184,21 +184,29 @@ func (d *Directory) RemoveCooperators(id []string) {
 	d.Cooperators = remains
 }
 
-func (d *Directory) AddSubscribers(id []string, names []string, date int64) {
-	tempArray := make([]*SubscriberMeta, len(id))
-	for _, item := range id {
-		if d.IsSubscribers(item, date) {
+func (d *Directory) AddSubscribers(ids []string, names []string, date int64) {
+	newSubscriberArray := make([]*SubscriberMeta, 0)
+	existedSubscriberMap := make(map[string]bool)
+
+	for _, subscriber := range d.Subscribers {
+		if subscriber.DueDate > date {
+			existedSubscriberMap[subscriber.Id] = true
+		}
+	}
+
+	for _, id := range ids {
+		if existedSubscriberMap[id] {
 			continue
 		}
 
-		tempArray = append(tempArray, &SubscriberMeta{
-			Id:      item,
+		newSubscriberArray = append(newSubscriberArray, &SubscriberMeta{
+			Id:      id,
 			DueDate: date,
 		})
 	}
-	d.Subscribers = append(d.Subscribers, tempArray...)
+	d.Subscribers = append(d.Subscribers, newSubscriberArray...)
 
-	for index, item := range id {
+	for index, item := range ids {
 		d.IDNameMap[item] = names[index]
 	}
 }
