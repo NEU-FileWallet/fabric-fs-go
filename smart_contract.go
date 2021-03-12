@@ -499,13 +499,7 @@ func (s *SmartContract) Subscribe(ctx contractapi.TransactionContextInterface, k
 		return nil, err
 	}
 
-	name, err := s.ReadUserName(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-
 	ids := []string{id}
-	names := []string{name}
 
 	timestamp, err := ctx.GetStub().GetTxTimestamp()
 	if err != nil {
@@ -522,14 +516,13 @@ func (s *SmartContract) Subscribe(ctx contractapi.TransactionContextInterface, k
 	}
 
 	if directory.IsCreator(id) || directory.IsCooperator(id) || directory.Visibility == Public {
-		directory.AddSubscribers(ids, names, timestamp.Seconds+validity)
+		err = s.AddSubscribers(ctx, key, ids, true)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		return nil, fmt.Errorf("can't access private directory")
 	}
 
-	err = directory.Save(ctx, key)
-	if err != nil {
-		return nil, err
-	}
 	return directory, nil
 }
